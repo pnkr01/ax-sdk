@@ -20,10 +20,18 @@ export class AxHttpClient {
      * Sends a batch of events using native Node.js fetch.
      * Includes a strict abort controller to prevent hanging sockets.
      */
-    async sendBatch(events: TelemetryEvent[]): Promise<void> {
+   async sendBatch(events: TelemetryEvent[]): Promise<void> {
         if (events.length === 0) return;
 
-        // Create an abort controller to enforce the timeout rule
+        const formattedEvents = events.map(event => ({
+            trace_id: event.traceId,
+            agent_model: event.agentModel,
+            tool_name: event.toolName,
+            payload_size: event.payloadSize,
+            status: event.status,
+            durationMs: event.durationMs // This one is camelCase in your Go struct!
+        }));
+
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -31,11 +39,13 @@ export class AxHttpClient {
             const response = await fetch(`${this.baseUrl}/v1/ingest/batch`, {
                 method: 'POST',
                 headers: this.headers,
-                body: JSON.stringify({ events }),
+                body: JSON.stringify({ events: formattedEvents }), // Send the mapped data
                 signal: controller.signal
             });
+
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const errorText = await response.text().catch(() => 'No error body');
+                throw new Error(`HTTP ${response.status}: ${errorText}`);
             }
 
         } catch (error) {
